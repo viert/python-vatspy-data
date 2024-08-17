@@ -1,9 +1,11 @@
 import json
 import requests
+import time
+from collections import defaultdict
 from logging import getLogger
 from shapely.geometry import shape
 from collections import deque
-from typing import Dict, Any, Optional
+from typing import Dict, DefaultDict, Any, List, Optional
 from .types import Country, Airport, FIR, UIR, GeoItem, ParserState
 
 DEFAULT_DATA_PATH = "https://raw.githubusercontent.com/vatsimnetwork/vatspy-data-project/master/VATSpy.dat"
@@ -17,10 +19,18 @@ class VatspyData:
     _data_path: str
     _geojson_path: str
 
-    countries: Dict[str, Country]
-    airports: Dict[str, Airport]
-    firs: Dict[str, FIR]
-    uirs: Dict[str, UIR]
+    _countries: List[Country]
+    _airports: List[Airport]
+    _firs: List[FIR]
+    _uirs: List[UIR]
+
+    _country_idx: Dict[str, int]
+    _airport_icao_idx: DefaultDict[str, List[int]]
+    _airport_iata_idx: DefaultDict[str, List[int]]
+    _fir_icao_idx: DefaultDict[str, List[int]]
+    _fir_prefix_idx: Dict[str, int]
+    _uir_icao_idx: Dict[str, int]
+    _uir_fir_idx: Dict[str, int]
 
     def __init__(self,
                  data_path: str = DEFAULT_DATA_PATH,
@@ -29,6 +39,7 @@ class VatspyData:
         self._data_path = data_path
         self._geojson_path = geojson_path
         self._load()
+        self._build_indexes()
 
     def _load(self):
         geo = self._load_geo()
@@ -42,6 +53,41 @@ class VatspyData:
                 geom=shape(item["geometry"])
             )
         self._parse(raw_data, geo_map)
+
+    def _build_indexes(self):
+        log.debug("building vatspy data indexes")
+        t1 = time.time()
+
+        self._country_idx = {}
+        for i, c in enumerate(self._countries):
+            for code in c.codes:
+                self._country_idx[code] = i
+
+        self._airport_icao_idx = defaultdict(list)
+        self._airport_iata_idx = defaultdict(list)
+
+        for i, a in enumerate(self._airports):
+            self._airport_icao_idx[a.icao].append(i)
+            if a.iata is not None:
+                self._airport_iata_idx[a.iata].append(i)
+
+        self._fir_icao_idx = defaultdict(list)
+        self._fir_prefix_idx = {}
+
+        for i, f in enumerate(self._firs):
+            self._fir_icao_idx[f.icao].append(i)
+            self._fir_prefix_idx[f.callsign_prefix] = i
+
+        self._uir_icao_idx = {}
+        self._uir_fir_idx = {}
+
+        for i, u in enumerate(self._uirs):
+            self._uir_icao_idx[u.icao] = i
+            for fir_id in u.fir_ids:
+                self._uir_fir_idx[fir_id] = i
+
+        t2 = time.time()
+        log.debug("vatspy data indexes built in %.3fs", t2 - t1)
 
     def _parse(self, raw_data: str, geo_map: Dict[str, GeoItem]):
         state = ParserState.STARTED
@@ -147,18 +193,23 @@ class VatspyData:
                     airports[icao] = airport
 
         self._reset()
-        for country in country_map.values():
-            for code in country.codes:
-                self.countries[code] = country
-        self.airports = airports
-        self.firs = firs
-        self.uirs = uirs
+        self._countries = list(country_map.values())
+        self._airports = list(airports.values())
+        self._firs = list(firs.values())
+        self._uirs = list(uirs.values())
 
     def _reset(self):
-        self.countries = {}
-        self.airports = {}
-        self.firs = {}
-        self.uirs = {}
+        self._countries = []
+        self._airports = []
+        self._firs = []
+        self._uirs = []
+        self._country_idx = {}
+        self._airport_icao_idx = defaultdict(list)
+        self._airport_iata_idx = defaultdict(list)
+        self._fir_icao_idx = defaultdict(list)
+        self._fir_prefix_idx = {}
+        self._uir_icao_idx = {}
+        self._uir_fir_idx = {}
 
     def _load_geo(self) -> Dict[str, Any]:
         use_http = self._geojson_path.startswith("http://") or self._geojson_path.startswith("https://")
@@ -177,3 +228,53 @@ class VatspyData:
         else:
             with open(self._data_path) as f:
                 return f.read()
+
+    def find_country_by_icao(self, icao: str) -> Optional[Country]:
+        idx = self._country_idx.get(icao[:2])
+        if idx is not None:
+            return self._countries[idx]
+        return None
+
+    def find_country_by_code(self, code: str) -> Optional[Country]:
+        idx = self._country_idx.get(code)
+        if idx is not None:
+            return self._countries[idx]
+        return None
+
+    def find_fir_by_callsign(self, callsign: str) -> Optional[FIR]:
+        code = callsign.split("_")[0]
+        idxs = self._fir_icao_idx.get(code)
+        if idxs:
+            return self._firs[idxs[0]]
+
+        for i in range(len(callsign), 4, -1):
+            code = callsign[:i]
+            idx = self._fir_prefix_idx.get(code)
+            if idx is not None:
+                return self._firs[idx]
+
+    def find_airport_by_callsign(self, callsign: str) -> Optional[Airport]:
+        code = callsign.split("_")[0]
+        return self.find_airport_by_code(code)
+
+    def find_airport_by_code(self, code: str) -> Optional[Airport]:
+        if len(code) < 4:
+            idxs = self._airport_iata_idx.get(code)
+            if not idxs:
+                return None
+            return self._airports[idxs[0]]
+
+        idxs = self._airport_icao_idx.get(code, self._airport_iata_idx.get(code))
+        if not idxs:
+            return None
+        return self._airports[idxs[0]]
+
+    def find_fir_by_code(self, code: str) -> Optional[FIR]:
+        idxs = self._fir_icao_idx.get(code)
+        if idxs:
+            return self._firs[idxs[0]]
+
+    def find_uir_by_code(self, code: str) -> Optional[FIR]:
+        idx = self._uir_icao_idx.get(code)
+        if idx is not None:
+            return self._firs[idx]
