@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vatspy-data"
-version = "1.0.1"
+version = "1.1.0"
 authors = [{name = "Pavel Vorobyev", email = "aquavitale@yandex.ru"}]
 description = "python representation of vatspy static data"
 requires-python = ">=3.11"
