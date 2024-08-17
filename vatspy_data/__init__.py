@@ -1,12 +1,16 @@
 import json
 import requests
+from logging import getLogger
 from shapely.geometry import shape
 from collections import deque
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from .types import Country, Airport, FIR, UIR, GeoItem, ParserState
 
 DEFAULT_DATA_PATH = "https://raw.githubusercontent.com/vatsimnetwork/vatspy-data-project/master/VATSpy.dat"
 DEFAULT_GEOJSON_PATH = "https://raw.githubusercontent.com/vatsimnetwork/vatspy-data-project/master/Boundaries.geojson"
+
+
+log = getLogger(__name__)
 
 
 class VatspyData:
@@ -43,7 +47,7 @@ class VatspyData:
         state = ParserState.STARTED
         lines = deque(raw_data.split("\n"))
 
-        def category_to_state(category: str):
+        def category_to_state(category: str) -> Optional[ParserState]:
             match category.lower():
                 case "countries":
                     return ParserState.READ_COUNTRY
@@ -56,7 +60,8 @@ class VatspyData:
                 case "idl":
                     return ParserState.FINISHED
                 case _:
-                    raise ValueError(f"unknown category {category}")
+                    log.error("unknown category %s", category)
+                    return None
 
         country_map = {}
         airports = {}
@@ -77,7 +82,8 @@ class VatspyData:
                 case ParserState.READ_COUNTRY:
                     tokens = line.split("|")
                     if len(tokens) != 3:
-                        raise ValueError(f"invalid country line {line}")
+                        log.error("invalid country line '%s'", line)
+                        continue
                     name, code, custom_radar = tokens
                     custom_radar = custom_radar or None
                     if name not in country_map:
@@ -90,12 +96,14 @@ class VatspyData:
                 case ParserState.READ_FIR:
                     tokens = line.split("|")
                     if len(tokens) != 4:
-                        raise ValueError(f"invalid FIR line {line}")
+                        log.error("invalid FIR line '%s'", line)
+                        continue
 
                     icao, name, callsign_prefix, geom_id = tokens
                     geom = geo_map.get(geom_id)
                     if geom is None:
-                        raise ValueError(f"no geometry for {line}")
+                        log.error("no geometry for '%s'", line)
+                        continue
 
                     fir = FIR(
                         icao=icao,
@@ -107,7 +115,8 @@ class VatspyData:
                 case ParserState.READ_UIR:
                     tokens = line.split("|")
                     if len(tokens) != 3:
-                        raise ValueError(f"invalid UIR line {line}")
+                        log.error("invalid UIR line '%s'", line)
+                        continue
 
                     icao, name, firs_list = tokens
                     fir_ids = firs_list.split(",")
@@ -122,7 +131,8 @@ class VatspyData:
                 case ParserState.READ_AIRPORT:
                     tokens = line.split("|")
                     if len(tokens) != 7:
-                        raise ValueError(f"invalid airport line {line}")
+                        log.error("invalid airport line '%s'", line)
+                        continue
                     icao, name, lat, lng, iata, fir_id, is_pseudo = tokens
                     iata = iata or None
                     airport = Airport(
