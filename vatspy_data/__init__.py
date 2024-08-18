@@ -3,10 +3,22 @@ import requests
 import time
 from collections import defaultdict
 from logging import getLogger
+from shapely import centroid
 from shapely.geometry import shape
 from collections import deque
 from typing import Dict, DefaultDict, Any, List, Optional
-from .types import Country, Airport, FIR, UIR, GeoItem, ParserState
+from .types import (
+    Country,
+    Airport,
+    FIR,
+    UIR,
+    GeoItem,
+    GeoItemProperties,
+    Boundaries,
+    BoundingBox,
+    Point,
+    ParserState
+)
 
 DEFAULT_DATA_PATH = "https://raw.githubusercontent.com/vatsimnetwork/vatspy-data-project/master/VATSpy.dat"
 DEFAULT_GEOJSON_PATH = "https://raw.githubusercontent.com/vatsimnetwork/vatspy-data-project/master/Boundaries.geojson"
@@ -48,9 +60,18 @@ class VatspyData:
         geo_map = {}
         for item in geo["features"]:
             item_id = item["properties"]["id"]
+            geom = shape(item["geometry"])
+            center = centroid(geom)
             geo_map[item_id] = GeoItem(
-                properties=item["properties"],
-                geom=shape(item["geometry"])
+                properties=GeoItemProperties(**item["properties"]),
+                boundaries=Boundaries(
+                    geometry=item["geometry"],
+                    bbox=BoundingBox(
+                        min=Point(lng=geom.bounds[0], lat=geom.bounds[1]),
+                        max=Point(lng=geom.bounds[2], lat=geom.bounds[3]),
+                    ),
+                    center=Point(lng=center.x, lat=center.y)
+                )
             )
         self._parse(raw_data, geo_map)
 
@@ -263,7 +284,6 @@ class VatspyData:
             if not idxs:
                 return None
             return self._airports[idxs[0]]
-
         idxs = self._airport_icao_idx.get(code, self._airport_iata_idx.get(code))
         if not idxs:
             return None

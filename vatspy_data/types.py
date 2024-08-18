@@ -1,8 +1,24 @@
 from enum import Enum, auto
-from typing import Optional, List, Annotated
+from typing import Optional, Dict, Any, List, Annotated
 from pydantic import BaseModel
 from pydantic.functional_validators import BeforeValidator
 from shapely.geometry.base import BaseGeometry
+
+
+class Point(BaseModel):
+    lat: float
+    lng: float
+
+
+class BoundingBox(BaseModel):
+    min: Point
+    max: Point
+
+
+class Boundaries(BaseModel):
+    geometry: Dict[str, Any]
+    bbox: BoundingBox
+    center: Point
 
 
 class GeoItemProperties(BaseModel):
@@ -16,7 +32,7 @@ class GeoItemProperties(BaseModel):
 
 class GeoItem(BaseModel):
     properties: GeoItemProperties
-    geom: BaseGeometry
+    boundaries: Boundaries
 
     model_config = {"arbitrary_types_allowed": True}
 
